@@ -1,12 +1,28 @@
-from fastapi import FastAPI
+import shutil
+from pathlib import Path
+
+from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from database import check_db_connection
-from embedder import embed_text
+from database import check_db_connection, insert_chunk, count_chunks
+from embedder import embed_text, embed_batch
 from search import hybrid_search, rerank
 from llm import generate_answer
+from parser import parse_document
+from chunker import chunk_document
 
 app = FastAPI(title="Smart RAG API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite's default dev server address
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 
 
 class QueryRequest(BaseModel):
@@ -24,6 +40,30 @@ def health():
     }
 
 
+@app.post("/upload")
+async def upload_document(file: UploadFile = File(...)):
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    file_path = UPLOAD_DIR / file.filename
+
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    text = parse_document(str(file_path))
+    chunks = chunk_document(text, max_chunk_size=800, overlap=100)
+    texts = [c.text for c in chunks]
+    embeddings = embed_batch(texts)
+
+    for chunk, embedding in zip(chunks, embeddings):
+        insert_chunk(file.filename, chunk.text, chunk.chunk_type, embedding)
+
+    return {
+        "filename": file.filename,
+        "chunks_stored": count_chunks(file.filename),
+        "table_chunks": sum(1 for c in chunks if c.chunk_type == "table"),
+        "text_chunks": sum(1 for c in chunks if c.chunk_type == "text"),
+    }
+
+
 @app.post("/query")
 def query(request: QueryRequest):
     query_embedding = embed_text(request.question)
@@ -37,5 +77,4 @@ def query(request: QueryRequest):
             "sources": [],
         }
 
-    result = generate_answer(request.question, reranked_results)
-    return result
+    return generate_answer(request.question, reranked_results)
