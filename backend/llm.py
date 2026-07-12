@@ -40,6 +40,13 @@ def generate_answer(query: str, context_chunks: list[dict]) -> dict:
 
     answer_text = response.text
 
+    usage = getattr(response, "usage_metadata", None)
+    token_usage = {
+        "prompt_tokens": getattr(usage, "prompt_token_count", None),
+        "completion_tokens": getattr(usage, "candidates_token_count", None),
+        "total_tokens": getattr(usage, "total_token_count", None),
+    } if usage else None
+
     sources = [
         {
             "source_number": i,
@@ -50,4 +57,4 @@ def generate_answer(query: str, context_chunks: list[dict]) -> dict:
         for i, chunk in enumerate(context_chunks, start=1)
     ]
 
-    return {"answer": answer_text, "sources": sources}
+    return {"answer": answer_text, "sources": sources, "token_usage": token_usage}

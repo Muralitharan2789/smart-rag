@@ -1,4 +1,5 @@
 import shutil
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File
@@ -30,6 +31,13 @@ class QueryRequest(BaseModel):
     top_k: int = 10
     rerank_top_n: int = 5
     document_name: str | None = None  # None = search all documents
+
+
+_query_cache: dict[str, dict] = {}
+
+
+def _cache_key(request: QueryRequest) -> str:
+    return f"{request.question.strip().lower()}|{request.document_name}|{request.top_k}|{request.rerank_top_n}"
 
 
 @app.get("/health")
@@ -67,15 +75,43 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/query")
 def query(request: QueryRequest):
-    query_embedding = embed_text(request.question)
+    cache_key = _cache_key(request)
+    if cache_key in _query_cache:
+        cached = dict(_query_cache[cache_key])
+        cached["cached"] = True
+        cached["timings"] = {"total_ms": 0.1, "note": "served from cache, no pipeline re-run"}
+        return cached
 
-    fused_results = hybrid_search(request.question, query_embedding, top_k=request.top_k, document_name=request.document_name)
+    timings = {}
+    t0 = time.perf_counter()
+
+    query_embedding = embed_text(request.question)
+    timings["embedding_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+
+    t1 = time.perf_counter()
+    fused_results = hybrid_search(
+        request.question, query_embedding, top_k=request.top_k, document_name=request.document_name
+    )
+    timings["hybrid_search_ms"] = round((time.perf_counter() - t1) * 1000, 1)
+
+    t2 = time.perf_counter()
     reranked_results = rerank(request.question, fused_results, top_n=request.rerank_top_n)
+    timings["rerank_ms"] = round((time.perf_counter() - t2) * 1000, 1)
 
     if not reranked_results:
+        timings["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         return {
             "answer": "No relevant information found in the indexed documents.",
             "sources": [],
+            "timings": timings,
         }
 
-    return generate_answer(request.question, reranked_results)
+    t3 = time.perf_counter()
+    result = generate_answer(request.question, reranked_results)
+    timings["llm_generation_ms"] = round((time.perf_counter() - t3) * 1000, 1)
+    timings["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+
+    result["timings"] = timings
+    result["cached"] = False
+    _query_cache[cache_key] = dict(result)
+    return result
