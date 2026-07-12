@@ -1,67 +1,82 @@
 from database import get_connection
 
 
-def vector_search(query_embedding: list[float], top_k: int = 10) -> list[dict]:
+def vector_search(query_embedding: list[float], top_k: int = 10, document_name: str | None = None) -> list[dict]:
     """
     Returns the top_k chunks most semantically similar to the query embedding,
-    ranked by cosine similarity (1 - cosine distance). pgvector's <=> operator
-    computes cosine distance directly, so lower is more similar.
+    ranked by cosine similarity. If document_name is provided, only searches
+    within that document; otherwise searches across all documents.
     """
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, document_name, chunk_text, chunk_type,
-                   1 - (embedding <=> %s::vector) AS similarity
-            FROM chunks
-            ORDER BY embedding <=> %s::vector
-            LIMIT %s;
-            """,
-            (query_embedding, query_embedding, top_k),
-        )
+        if document_name:
+            cur.execute(
+                """
+                SELECT id, document_name, chunk_text, chunk_type,
+                       1 - (embedding <=> %s::vector) AS similarity
+                FROM chunks
+                WHERE document_name = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s;
+                """,
+                (query_embedding, document_name, query_embedding, top_k),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, document_name, chunk_text, chunk_type,
+                       1 - (embedding <=> %s::vector) AS similarity
+                FROM chunks
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s;
+                """,
+                (query_embedding, query_embedding, top_k),
+            )
         rows = cur.fetchall()
         return [
-            {
-                "id": r[0],
-                "document_name": r[1],
-                "chunk_text": r[2],
-                "chunk_type": r[3],
-                "similarity": r[4],
-            }
+            {"id": r[0], "document_name": r[1], "chunk_text": r[2], "chunk_type": r[3], "similarity": r[4]}
             for r in rows
         ]
     finally:
         conn.close()
 
-def keyword_search(query_text: str, top_k: int = 10) -> list[dict]:
+def keyword_search(query_text: str, top_k: int = 10, document_name: str | None = None) -> list[dict]:
     """
     Returns the top_k chunks best matching the query via BM25-style full-text
-    ranking (ts_rank), using Postgres's built-in text search.
+    ranking. If document_name is provided, only searches within that document.
     """
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, document_name, chunk_text, chunk_type,
-                   ts_rank(content_tsv, plainto_tsquery('english', %s)) AS rank
-            FROM chunks
-            WHERE content_tsv @@ plainto_tsquery('english', %s)
-            ORDER BY rank DESC
-            LIMIT %s;
-            """,
-            (query_text, query_text, top_k),
-        )
+        if document_name:
+            cur.execute(
+                """
+                SELECT id, document_name, chunk_text, chunk_type,
+                       ts_rank(content_tsv, plainto_tsquery('english', %s)) AS rank
+                FROM chunks
+                WHERE content_tsv @@ plainto_tsquery('english', %s)
+                  AND document_name = %s
+                ORDER BY rank DESC
+                LIMIT %s;
+                """,
+                (query_text, query_text, document_name, top_k),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, document_name, chunk_text, chunk_type,
+                       ts_rank(content_tsv, plainto_tsquery('english', %s)) AS rank
+                FROM chunks
+                WHERE content_tsv @@ plainto_tsquery('english', %s)
+                ORDER BY rank DESC
+                LIMIT %s;
+                """,
+                (query_text, query_text, top_k),
+            )
         rows = cur.fetchall()
         return [
-            {
-                "id": r[0],
-                "document_name": r[1],
-                "chunk_text": r[2],
-                "chunk_type": r[3],
-                "rank": r[4],
-            }
+            {"id": r[0], "document_name": r[1], "chunk_text": r[2], "chunk_type": r[3], "rank": r[4]}
             for r in rows
         ]
     finally:
@@ -103,11 +118,12 @@ def reciprocal_rank_fusion(
     return fused
 
 
-def hybrid_search(query_text: str, query_embedding: list[float], top_k: int = 10) -> list[dict]:
-    """Convenience wrapper: runs both searches and fuses them in one call."""
-    vector_results = vector_search(query_embedding, top_k=top_k)
-    keyword_results = keyword_search(query_text, top_k=top_k)
+def hybrid_search(query_text: str, query_embedding: list[float], top_k: int = 10, document_name: str | None = None) -> list[dict]:
+    """Convenience wrapper: runs both searches (optionally scoped to one document) and fuses them."""
+    vector_results = vector_search(query_embedding, top_k=top_k, document_name=document_name)
+    keyword_results = keyword_search(query_text, top_k=top_k, document_name=document_name)
     return reciprocal_rank_fusion(vector_results, keyword_results, top_n=top_k)
+
 
 
 from sentence_transformers import CrossEncoder

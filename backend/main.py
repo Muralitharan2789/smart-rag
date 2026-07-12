@@ -29,6 +29,7 @@ class QueryRequest(BaseModel):
     question: str
     top_k: int = 10
     rerank_top_n: int = 5
+    document_name: str | None = None  # None = search all documents
 
 
 @app.get("/health")
@@ -68,7 +69,7 @@ async def upload_document(file: UploadFile = File(...)):
 def query(request: QueryRequest):
     query_embedding = embed_text(request.question)
 
-    fused_results = hybrid_search(request.question, query_embedding, top_k=request.top_k)
+    fused_results = hybrid_search(request.question, query_embedding, top_k=request.top_k, document_name=request.document_name)
     reranked_results = rerank(request.question, fused_results, top_n=request.rerank_top_n)
 
     if not reranked_results:
