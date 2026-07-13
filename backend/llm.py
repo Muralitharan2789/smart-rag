@@ -24,7 +24,13 @@ def generate_answer(query: str, context_chunks: list[dict]) -> dict:
         "You are a precise assistant that answers questions using ONLY the provided "
         "source excerpts. If the answer isn't in the sources, say so clearly instead "
         "of guessing. When you use information from a source, reference it by its "
-        "[Source N] number."
+        "[Source N] number.\n\n"
+        "You may factually summarize what a source says about financial performance, "
+        "trends, or outlook. You must NOT provide investment advice or recommendations "
+        "(e.g. whether to buy, hold, or sell a security). If asked for such a "
+        "recommendation, summarize the relevant factual content from the sources, then "
+        "clearly state that you can't provide investment advice and this isn't a "
+        "substitute for professional financial guidance."
     )
 
     prompt = f"Sources:\n\n{context_text}\n\nQuestion: {query}"

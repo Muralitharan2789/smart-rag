@@ -1,61 +1,84 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import "./App.css";
 
 const API_BASE = "http://localhost:8000";
 
-function SourcesPanel({ sources }) {
-  const [expandedIndex, setExpandedIndex] = useState(null);
+function StatusDot() {
+  const [status, setStatus] = useState("checking");
 
-  if (!sources || sources.length === 0) return null;
+  useEffect(() => {
+    const check = () => {
+      axios
+        .get(`${API_BASE}/health`)
+        .then((res) => setStatus(res.data.status === "ok" ? "online" : "degraded"))
+        .catch(() => setStatus("offline"));
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
-    <div style={{ marginTop: "0.5rem" }}>
-      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-        {sources.map((src, i) => (
-          <button
-            key={i}
-            onClick={() => setExpandedIndex(expandedIndex === i ? null : i)}
-            style={{
-              fontSize: "0.8rem",
-              padding: "0.2rem 0.5rem",
-              borderRadius: "12px",
-              border: "1px solid #999",
-              background: expandedIndex === i ? "#e0e0ff" : "#f0f0f0",
-              cursor: "pointer",
-            }}
-          >
-            Source {src.source_number}
-          </button>
-        ))}
-      </div>
+    <div className="status">
+      <span className={`status-dot status-dot--${status}`} />
+      <span className="status-label">
+        {status === "online" ? "Backend connected" : status === "checking" ? "Connecting..." : "Backend unreachable"}
+      </span>
+    </div>
+  );
+}
 
-      {expandedIndex !== null && (
-        <div
-          style={{
-            marginTop: "0.5rem",
-            padding: "0.75rem",
-            background: "#fafafa",
-            border: "1px solid #ddd",
-            borderRadius: "6px",
-          }}
-        >
-          <div style={{ fontSize: "0.8rem", color: "#666", marginBottom: "0.4rem" }}>
-            {sources[expandedIndex].document_name} · {sources[expandedIndex].chunk_type}
+function Exhibit({ source, index, isOpen, onToggle }) {
+  return (
+    <div className="exhibit">
+      <button className={`exhibit-tab ${isOpen ? "exhibit-tab--open" : ""}`} onClick={onToggle}>
+        Exhibit {source.source_number}
+      </button>
+      {isOpen && (
+        <div className="exhibit-card">
+          <div className="exhibit-card-header">
+            <span className="exhibit-seal">✓ Verified in source</span>
+            <span className="exhibit-meta">
+              {source.document_name} · {source.chunk_type}
+            </span>
           </div>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {sources[expandedIndex].chunk_text_preview}
-          </ReactMarkdown>
+          <div className="exhibit-body">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{source.chunk_text_preview}</ReactMarkdown>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function FileUpload({ onUploaded }) {
+function SourcesRow({ sources }) {
+  const [openIndex, setOpenIndex] = useState(null);
+  if (!sources || sources.length === 0) return null;
+
+  return (
+    <div className="sources-row">
+      <div className="exhibit-list">
+        {sources.map((src, i) => (
+          <Exhibit
+            key={i}
+            source={src}
+            index={i}
+            isOpen={openIndex === i}
+            onToggle={() => setOpenIndex(openIndex === i ? null : i)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FileUpload() {
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState(null);
+  const inputRef = useRef(null);
 
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
@@ -71,30 +94,38 @@ function FileUpload({ onUploaded }) {
       const res = await axios.post(`${API_BASE}/upload`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setStatus(
-        `Uploaded: ${res.data.chunks_stored} chunks (${res.data.table_chunks} tables, ${res.data.text_chunks} text)`
-      );
-      if (onUploaded) onUploaded();
+      setStatus({
+        type: "success",
+        text: `${file.name} indexed — ${res.data.chunks_stored} chunks (${res.data.table_chunks} tables, ${res.data.text_chunks} text)`,
+      });
     } catch (err) {
-      setStatus(`Upload failed: ${err.message}`);
+      setStatus({ type: "error", text: `Upload failed: ${err.message}` });
     } finally {
       setUploading(false);
-      e.target.value = ""; // allows re-uploading the same filename later if needed
+      e.target.value = "";
     }
   };
 
   return (
-    <div
-      style={{
-        marginBottom: "1rem",
-        padding: "1rem",
-        border: "1px dashed #999",
-        borderRadius: "8px",
-      }}
-    >
-      <input type="file" accept=".pdf,.docx" onChange={handleFileChange} disabled={uploading} />
-      {uploading && <p style={{ color: "#888" }}>Uploading and indexing...</p>}
-      {status && <p style={{ fontSize: "0.9rem" }}>{status}</p>}
+    <div className="upload-zone">
+      <div className="upload-zone-left">
+        <span className="upload-icon">⬆</span>
+        <div>
+          <div className="upload-title">Add a document</div>
+          <div className="upload-subtitle">PDF or DOCX — parsed, chunked, and indexed automatically</div>
+        </div>
+      </div>
+      <button className="upload-button" onClick={() => inputRef.current.click()} disabled={uploading}>
+        {uploading ? "Indexing..." : "Choose file"}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.docx"
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+      />
+      {status && <div className={`upload-status upload-status--${status.type}`}>{status.text}</div>}
     </div>
   );
 }
@@ -103,9 +134,14 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
   const handleAsk = async () => {
-    if (!question.trim()) return;
+    if (!question.trim() || loading) return;
 
     const userMessage = { role: "user", text: question };
     setMessages((prev) => [...prev, userMessage]);
@@ -120,12 +156,17 @@ function App() {
       });
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: res.data.answer, sources: res.data.sources },
+        {
+          role: "assistant",
+          text: res.data.answer,
+          sources: res.data.sources,
+          timings: res.data.timings,
+        },
       ]);
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: `Error: ${err.message}`, sources: [] },
+        { role: "assistant", text: `Something went wrong reaching the backend: ${err.message}`, sources: [], error: true },
       ]);
     } finally {
       setLoading(false);
@@ -133,51 +174,76 @@ function App() {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter") handleAsk();
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleAsk();
+    }
   };
 
   return (
-    <div style={{ maxWidth: "700px", margin: "2rem auto", fontFamily: "sans-serif" }}>
-      <h1>Smart RAG</h1>
-
-      <FileUpload />
-
-      <div
-        style={{
-          border: "1px solid #ccc",
-          borderRadius: "8px",
-          padding: "1rem",
-          minHeight: "300px",
-        }}
-      >
-        {messages.length === 0 && (
-          <p style={{ color: "#888" }}>Ask a question about your uploaded documents.</p>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} style={{ marginBottom: "1.5rem" }}>
-            <strong>{msg.role === "user" ? "You" : "Smart RAG"}:</strong>
-            <div>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
-            </div>
-            {msg.role === "assistant" && <SourcesPanel sources={msg.sources} />}
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header-left">
+          <div className="app-mark">SR</div>
+          <div>
+            <div className="app-title">Smart RAG</div>
+            <div className="app-eyebrow">Table-aware, evidence-grounded Q&amp;A</div>
           </div>
-        ))}
-        {loading && <p style={{ color: "#888" }}>Thinking...</p>}
-      </div>
+        </div>
+        <StatusDot />
+      </header>
 
-      <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
-        <input
-          type="text"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask a question..."
-          style={{ flex: 1, padding: "0.5rem" }}
-        />
-        <button onClick={handleAsk} disabled={loading}>
-          Ask
-        </button>
-      </div>
+      <main className="app-main">
+        <FileUpload />
+
+        <div className="chat-panel">
+          {messages.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-state-title">No questions asked yet</div>
+              <div className="empty-state-subtitle">
+                Upload a document above, then ask a question about its contents. Every
+                answer is backed by numbered exhibits linking back to the exact source.
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg, i) => (
+            <div key={i} className={`message message--${msg.role}`}>
+              <div className="message-label">{msg.role === "user" ? "You" : "Smart RAG"}</div>
+              <div className={`message-bubble ${msg.error ? "message-bubble--error" : ""}`}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+              </div>
+              {msg.role === "assistant" && !msg.error && <SourcesRow sources={msg.sources} />}
+            </div>
+          ))}
+
+          {loading && (
+            <div className="message message--assistant">
+              <div className="message-label">Smart RAG</div>
+              <div className="message-bubble message-bubble--loading">
+                <span className="loading-dot" />
+                <span className="loading-dot" />
+                <span className="loading-dot" />
+              </div>
+            </div>
+          )}
+          <div ref={scrollRef} />
+        </div>
+
+        <div className="composer">
+          <textarea
+            className="composer-input"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask a question about your uploaded documents..."
+            rows={1}
+          />
+          <button className="composer-button" onClick={handleAsk} disabled={loading || !question.trim()}>
+            Ask
+          </button>
+        </div>
+      </main>
     </div>
   );
 }
