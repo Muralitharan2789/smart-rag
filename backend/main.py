@@ -13,6 +13,7 @@ from search import hybrid_search, rerank
 from llm import generate_answer
 from parser import parse_document
 from chunker import chunk_document
+from agent import agentic_query
 
 app = FastAPI(title="Smart RAG API")
 
@@ -146,6 +147,14 @@ def query(request: QueryRequest):
         logger.error(f"ERROR | question={request.question[:60]!r} | {e}")
         log_query(request.question, request.document_name, cached=False, error=True)
         raise
+
+@app.post("/query-agentic")
+def query_agentic(request: QueryRequest):
+    logger.info(f"AGENTIC QUERY | question={request.question[:60]!r}")
+    result = agentic_query(request.question, document_name=request.document_name, max_hops=2)
+    log_query(request.question, request.document_name, cached=False, error=False,
+               num_sources=len(result.get("sources", [])))
+    return result
 
 @app.get("/metrics")
 def metrics():
