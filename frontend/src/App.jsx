@@ -134,11 +134,19 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [selectedDoc, setSelectedDoc] = useState("");
   const scrollRef = useRef(null);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+  axios.get(`${API_BASE}/documents`)
+    .then((res) => setDocuments(res.data.documents))
+    .catch(() => setDocuments([]));
+  }, []);
 
   const handleAsk = async () => {
     if (!question.trim() || loading) return;
@@ -153,6 +161,7 @@ function App() {
         question: userMessage.text,
         top_k: 10,
         rerank_top_n: 5,
+        document_name: selectedDoc || null,
       });
       setMessages((prev) => [
         ...prev,
@@ -194,8 +203,23 @@ function App() {
       </header>
 
       <main className="app-main">
+        <div className="doc-selector">
+        <label htmlFor="doc-select">Searching:</label>
+        <select
+          id="doc-select"
+          value={selectedDoc}
+          onChange={(e) => setSelectedDoc(e.target.value)}
+        >
+          <option value="">All documents</option>
+          {documents.map((doc) => (
+            <option key={doc.name} value={doc.name}>
+              {doc.name} ({doc.chunk_count} chunks)
+            </option>
+          ))}
+        </select>
+        </div>
         <FileUpload />
-
+        
         <div className="chat-panel">
           {messages.length === 0 && (
             <div className="empty-state">

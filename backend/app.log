@@ -99,3 +99,7 @@
 2026-07-18 22:41:29,600 [INFO] CACHE HIT | question='What is the average rainfall in Asia in 2009 according to Ta'
 2026-07-18 22:41:33,589 [INFO] CACHE HIT | question='Who plays the character described as the Lovable ogre?'
 2026-07-18 22:41:38,147 [INFO] CACHE HIT | question='What is the capital of France?'
+2026-07-18 22:48:47,925 [WARNING] Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-07-18 22:49:06,254 [INFO] SUCCESS | question='What is the average rainfall in Asia in 2009 according to Ta' | total_ms=18955.1 | sources=5
+2026-07-18 22:49:14,754 [INFO] SUCCESS | question='Who plays the character described as the Lovable ogre?' | total_ms=2361.9 | sources=5
+2026-07-18 22:49:21,307 [INFO] SUCCESS | question='What is the capital of France?' | total_ms=2676.9 | sources=5

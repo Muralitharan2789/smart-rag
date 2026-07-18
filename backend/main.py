@@ -86,6 +86,18 @@ async def upload_document(file: UploadFile = File(...)):
         "text_chunks": sum(1 for c in chunks if c.chunk_type == "text"),
     }
 
+
+@app.get("/documents")
+def list_documents():
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT document_name, COUNT(*) FROM chunks GROUP BY document_name ORDER BY document_name;")
+        rows = cur.fetchall()
+        return {"documents": [{"name": r[0], "chunk_count": r[1]} for r in rows]}
+    finally:
+        conn.close()
+
 @app.post("/query")
 def query(request: QueryRequest):
     cache_key = _cache_key(request)
